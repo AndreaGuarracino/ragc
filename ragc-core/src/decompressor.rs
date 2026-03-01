@@ -228,6 +228,27 @@ impl Decompressor {
         result.ok_or_else(|| anyhow!("Sample not found: {sample_name}"))
     }
 
+    /// Get list of contigs for a sample, loading only names (not segment details).
+    /// Much faster than `list_contigs()` because it skips decompressing segment descriptors.
+    pub fn list_contigs_names_only(&mut self, sample_name: &str) -> Result<Vec<String>> {
+        // Load ALL contig name batches if sample not found
+        if self
+            .collection
+            .get_no_contigs(sample_name)
+            .is_none_or(|count| count == 0)
+        {
+            let num_batches = self.collection.get_no_contig_batches(&self.archive)?;
+            for batch_id in 0..num_batches {
+                self.collection
+                    .load_contig_names_batch(&mut self.archive, batch_id)?;
+            }
+        }
+
+        self.collection
+            .get_contig_list(sample_name)
+            .ok_or_else(|| anyhow!("Sample not found: {sample_name}"))
+    }
+
     /// Get the length of a contig without decompressing it
     ///
     /// This is O(1) once segment metadata is loaded, as it computes the length
@@ -240,12 +261,9 @@ impl Decompressor {
     /// # Returns
     /// The total length of the contig in bases
     pub fn get_contig_length(&mut self, sample_name: &str, contig_name: &str) -> Result<usize> {
-        // Load contig batches if needed
-        if self
-            .collection
-            .get_no_contigs(sample_name)
-            .is_none_or(|count| count == 0)
-        {
+        // Load contig batches if needed (full load including details)
+        if !self.collection.are_details_loaded() {
+            self.collection.reset_samples_loaded();
             let num_batches = self.collection.get_no_contig_batches(&self.archive)?;
             for batch_id in 0..num_batches {
                 self.collection
@@ -312,11 +330,8 @@ impl Decompressor {
         }
 
         // Load contig batches if needed
-        if self
-            .collection
-            .get_no_contigs(sample_name)
-            .is_none_or(|count| count == 0)
-        {
+        if !self.collection.are_details_loaded() {
+            self.collection.reset_samples_loaded();
             let num_batches = self.collection.get_no_contig_batches(&self.archive)?;
             for batch_id in 0..num_batches {
                 self.collection
