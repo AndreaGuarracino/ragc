@@ -1196,10 +1196,14 @@ impl CollectionV3 {
         self.details_loaded
     }
 
-    /// Reset the samples_loaded counter so batches can be re-loaded with full details.
-    /// Call this before load_contig_batch() if names-only loading was done previously.
+    /// Reset the samples_loaded counter so batches can be re-loaded.
+    /// Also invalidates `details_loaded`, because a subsequent names-only reload
+    /// calls `deserialize_contig_names` which clears `contigs[]` (wiping any
+    /// previously-loaded segment descriptors). Full-load paths immediately set
+    /// `details_loaded = true` again at the end of `load_contig_batch`.
     pub fn reset_samples_loaded(&mut self) {
         self.samples_loaded = 0;
+        self.details_loaded = false;
     }
 
     /// Store a batch of contigs (names + details)

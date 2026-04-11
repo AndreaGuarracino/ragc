@@ -237,6 +237,11 @@ impl Decompressor {
             .get_no_contigs(sample_name)
             .is_none_or(|count| count == 0)
         {
+            // Rewind the internal batch cursor. Without this, a second call on a
+            // missing sample would pass a stale `samples_loaded` offset into
+            // `deserialize_contig_names` and panic with an out-of-bounds index
+            // into `sample_desc`.
+            self.collection.reset_samples_loaded();
             let num_batches = self.collection.get_no_contig_batches(&self.archive)?;
             for batch_id in 0..num_batches {
                 self.collection
