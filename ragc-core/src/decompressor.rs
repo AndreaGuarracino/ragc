@@ -16,6 +16,16 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::path::Path;
 
+/// Segment cache cap (RAGC_CACHE_SIZE, default 32). Bounds memory growth
+/// from reference-segment caching during BFS-style scans.
+fn cache_capacity() -> usize {
+    std::env::var("RAGC_CACHE_SIZE")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(32)
+}
+
 /// Configuration for the decompressor
 #[derive(Debug, Clone)]
 pub struct DecompressorConfig {
@@ -59,8 +69,9 @@ pub struct Decompressor {
     archive: Archive,
     collection: CollectionV3,
 
-    // Cached segment data (group_id -> reference segment)
+    // Bounded reference segment cache (group_id -> reference segment).
     segment_cache: HashMap<u32, Contig>,
+    cache_cap: usize,
 
     // Archive parameters
     _segment_size: u32,
@@ -104,11 +115,13 @@ impl Decompressor {
             eprintln!("Sample names: {samples:?}");
         }
 
+        let cache_cap = cache_capacity();
         Ok(Decompressor {
             config,
             archive,
             collection,
-            segment_cache: HashMap::new(),
+            segment_cache: HashMap::with_capacity(cache_cap),
+            cache_cap,
             _segment_size: segment_size,
             kmer_length,
             min_match_len,
@@ -521,8 +534,18 @@ impl Decompressor {
         // decompress_segment_with_marker returns bytes in the stored format for references
         // Our helper already returns decompressed raw bytes for references
         let reference = decompressed;
-        self.segment_cache.insert(group_id, reference.clone());
+        self.cache_insert(group_id, reference.clone());
         Ok(reference)
+    }
+
+    /// Insert with random-victim eviction once at cap.
+    /// (Random = whichever key `HashMap::keys().next()` hands back.)
+    fn cache_insert(&mut self, group_id: u32, data: Contig) {
+        while self.segment_cache.len() >= self.cache_cap {
+            let k = *self.segment_cache.keys().next().unwrap();
+            self.segment_cache.remove(&k);
+        }
+        self.segment_cache.insert(group_id, data);
     }
 
     /// Extract all contigs from a sample
@@ -812,7 +835,7 @@ impl Decompressor {
                 }
 
                 // Cache the reference
-                self.segment_cache.insert(desc.group_id, decompressed_ref);
+                self.cache_insert(desc.group_id, decompressed_ref);
             }
 
             // If this IS the reference (in_group_id == 0), return it directly
