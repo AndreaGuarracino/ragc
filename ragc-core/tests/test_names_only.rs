@@ -96,3 +96,29 @@ fn get_contig_length_after_names_only() {
 
     eprintln!("  OK: get_contig_length({sample}, {contig}) = {len}");
 }
+
+/// Test 4: two consecutive misses on `list_contigs_names_only` must not panic.
+///
+/// Regression for the codex-flagged P1: without rewinding `samples_loaded`
+/// between calls, a second miss would feed a stale offset into
+/// `deserialize_contig_names` and panic with an out-of-bounds index into
+/// `sample_desc`. Expected behavior is a clean `Sample not found` error
+/// on every miss.
+#[test]
+fn repeated_missing_samples_do_not_panic() {
+    let Some((mut dec, _path)) = open_agc() else {
+        eprintln!("Skipping: AGC_TEST_FILE not set");
+        return;
+    };
+
+    for label in ["__missing_one__", "__missing_two__", "__missing_three__"] {
+        let err = dec
+            .list_contigs_names_only(label)
+            .expect_err("missing sample should return an error, not data");
+        assert!(
+            err.to_string().contains("Sample not found"),
+            "unexpected error for {label}: {err}"
+        );
+    }
+    eprintln!("  OK: three consecutive misses returned errors without panicking");
+}
